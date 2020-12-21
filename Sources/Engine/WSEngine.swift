@@ -72,7 +72,7 @@ FrameCollectorDelegate, HTTPHandlerDelegate {
         var pointer = [UInt8](repeating: 0, count: capacity)
         writeUint16(&pointer, offset: 0, value: closeCode)
         let payload = Data(bytes: pointer, count: MemoryLayout<UInt16>.size)
-        write(data: payload, opcode: .connectionClose, completion: { [weak self] in
+        write(data: payload, opcode: .connectionClose, completion: { [weak self] (_) in
             self?.reset()
             self?.forceStop()
         })
@@ -82,18 +82,22 @@ FrameCollectorDelegate, HTTPHandlerDelegate {
         transport.disconnect()
     }
     
-    public func write(string: String, completion: (() -> ())?) {
+    public func write(string: String, completion: ((WebSocketWriteError?) -> ())?) {
         let data = string.data(using: .utf8)!
         write(data: data, opcode: .textFrame, completion: completion)
     }
     
-    public func write(data: Data, opcode: FrameOpCode, completion: (() -> ())?) {
+    public func write(data: Data, opcode: FrameOpCode, completion: ((WebSocketWriteError?) -> ())?) {
         writeQueue.async { [weak self] in
-            guard let s = self else { return }
+            guard let s = self else {
+                completion?(.notReadyToWrite)
+                return
+            }
             s.mutex.wait()
             let canWrite = s.canSend
             s.mutex.signal()
             if !canWrite {
+                completion?(.notReadyToWrite)
                 return
             }
             
@@ -105,8 +109,12 @@ FrameCollectorDelegate, HTTPHandlerDelegate {
             }
             
             let frameData = s.framer.createWriteFrame(opcode: opcode, payload: sendData, isCompressed: isCompressed)
-            s.transport.write(data: frameData, completion: {_ in
-                completion?()
+            s.transport.write(data: frameData, completion: { (error) in
+                if let error = error {
+                    completion?(.error(error))
+                } else {
+                    completion?(nil)
+                }
             })
         }
     }

@@ -33,24 +33,46 @@ public class NativeEngine: NSObject, Engine, URLSessionDataDelegate, URLSessionW
         stop(closeCode: UInt16(URLSessionWebSocketTask.CloseCode.abnormalClosure.rawValue))
     }
 
-    public func write(string: String, completion: (() -> ())?) {
-        task?.send(.string(string), completionHandler: { (error) in
-            completion?()
+    public func write(string: String, completion: ((WebSocketWriteError?) -> ())?) {
+        guard let task = task else {
+            completion?(.notReadyToWrite)
+            return
+        }
+
+        task.send(.string(string), completionHandler: { (error) in
+            if let error = error {
+                completion?(.error(error))
+            } else {
+                completion?(nil)
+            }
         })
     }
 
-    public func write(data: Data, opcode: FrameOpCode, completion: (() -> ())?) {
+    public func write(data: Data, opcode: FrameOpCode, completion: ((WebSocketWriteError?) -> ())?) {
+        guard let task = task else {
+            completion?(.notReadyToWrite)
+            return
+        }
+
         switch opcode {
         case .binaryFrame:
-            task?.send(.data(data), completionHandler: { (error) in
-                completion?()
+            task.send(.data(data), completionHandler: { (error) in
+                if let error = error {
+                    completion?(.error(error))
+                } else {
+                    completion?(nil)
+                }
             })
         case .textFrame:
             let text = String(data: data, encoding: .utf8)!
             write(string: text, completion: completion)
         case .ping:
-            task?.sendPing(pongReceiveHandler: { (error) in
-                completion?()
+            task.sendPing(pongReceiveHandler: { (error) in
+                if let error = error {
+                    completion?(.error(error))
+                } else {
+                    completion?(nil)
+                }
             })
         default:
             break //unsupported

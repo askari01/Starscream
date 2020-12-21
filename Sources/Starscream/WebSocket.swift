@@ -41,14 +41,21 @@ public struct WSError: Error {
     }
 }
 
+public enum WebSocketWriteError: Error {
+    /// Socket is not configured yet or already disconnecte
+    case notReadyToWrite
+
+    case error(Error)
+}
+
 public protocol WebSocketClient: class {
     func connect()
     func disconnect(closeCode: UInt16)
-    func write(string: String, completion: (() -> ())?)
-    func write(stringData: Data, completion: (() -> ())?)
-    func write(data: Data, completion: (() -> ())?)
-    func write(ping: Data, completion: (() -> ())?)
-    func write(pong: Data, completion: (() -> ())?)
+    func write(string: String, completion: ((WebSocketWriteError?) -> ())?)
+    func write(stringData: Data, completion: ((WebSocketWriteError?) -> ())?)
+    func write(data: Data, completion: ((WebSocketWriteError?) -> ())?)
+    func write(ping: Data, completion: ((WebSocketWriteError?) -> ())?)
+    func write(pong: Data, completion: ((WebSocketWriteError?) -> ())?)
 }
 
 //implements some of the base behaviors
@@ -143,27 +150,27 @@ open class WebSocket: WebSocketClient, EngineDelegate {
         engine.forceStop()
     }
     
-    public func write(data: Data, completion: (() -> ())?) {
+    public func write(data: Data, completion: ((WebSocketWriteError?) -> ())?) {
          write(data: data, opcode: .binaryFrame, completion: completion)
     }
     
-    public func write(string: String, completion: (() -> ())?) {
+    public func write(string: String, completion: ((WebSocketWriteError?) -> ())?) {
         engine.write(string: string, completion: completion)
     }
     
-    public func write(stringData: Data, completion: (() -> ())?) {
+    public func write(stringData: Data, completion: ((WebSocketWriteError?) -> ())?) {
         write(data: stringData, opcode: .textFrame, completion: completion)
     }
     
-    public func write(ping: Data, completion: (() -> ())?) {
+    public func write(ping: Data, completion: ((WebSocketWriteError?) -> ())?) {
         write(data: ping, opcode: .ping, completion: completion)
     }
     
-    public func write(pong: Data, completion: (() -> ())?) {
+    public func write(pong: Data, completion: ((WebSocketWriteError?) -> ())?) {
         write(data: pong, opcode: .pong, completion: completion)
     }
     
-    private func write(data: Data, opcode: FrameOpCode, completion: (() -> ())?) {
+    private func write(data: Data, opcode: FrameOpCode, completion: ((WebSocketWriteError?) -> ())?) {
         engine.write(data: data, opcode: opcode, completion: completion)
     }
     
