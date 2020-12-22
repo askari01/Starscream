@@ -57,6 +57,15 @@ public struct WSError: Error {
     public let code: Int
 }
 
+public enum WebSocketWriteError: Error {
+    /// Socket is not configured yet or already disconnecte
+    case notReadyToWrite
+
+    case error(Error)
+
+    case cancelled
+}
+
 //WebSocketClient is setup to be dependency injection for testing
 public protocol WebSocketClient: class {
     var delegate: WebSocketDelegate? {get set}
@@ -74,10 +83,10 @@ public protocol WebSocketClient: class {
     
     func connect()
     func disconnect(forceTimeout: TimeInterval?, closeCode: UInt16)
-    func write(string: String, completion: (() -> ())?)
-    func write(data: Data, completion: (() -> ())?)
-    func write(ping: Data, completion: (() -> ())?)
-    func write(pong: Data, completion: (() -> ())?)
+    func write(string: String, completion: ((WebSocketWriteError?) -> ())?)
+    func write(data: Data, completion: ((WebSocketWriteError?) -> ())?)
+    func write(ping: Data, completion: ((WebSocketWriteError?) -> ())?)
+    func write(pong: Data, completion: ((WebSocketWriteError?) -> ())?)
 }
 
 //implements some of the base behaviors
@@ -538,7 +547,7 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
      - parameter string:        The string to write.
      - parameter completion: The (optional) completion handler.
      */
-    open func write(string: String, completion: (() -> ())? = nil) {
+    open func write(string: String, completion: ((WebSocketWriteError?) -> ())? = nil) {
         guard isConnected else { return }
         dequeueWrite(string.data(using: String.Encoding.utf8)!, code: .textFrame, writeCompletion: completion)
     }
@@ -551,7 +560,7 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
      - parameter data:       The data to write.
      - parameter completion: The (optional) completion handler.
      */
-    open func write(data: Data, completion: (() -> ())? = nil) {
+    open func write(data: Data, completion: ((WebSocketWriteError?) -> ())? = nil) {
         guard isConnected else { return }
         dequeueWrite(data, code: .binaryFrame, writeCompletion: completion)
     }
@@ -560,7 +569,7 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
      Write a ping to the websocket. This sends it as a control frame.
      Yodel a   sound  to the planet.    This sends it as an astroid. http://youtu.be/Eu5ZJELRiJ8?t=42s
      */
-    open func write(ping: Data, completion: (() -> ())? = nil) {
+    open func write(ping: Data, completion: ((WebSocketWriteError?) -> ())? = nil) {
         guard isConnected else { return }
         dequeueWrite(ping, code: .ping, writeCompletion: completion)
     }
@@ -569,7 +578,7 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
      Write a pong to the websocket. This sends it as a control frame.
      Respond to a Yodel.
      */
-    open func write(pong: Data, completion: (() -> ())? = nil) {
+    open func write(pong: Data, completion: ((WebSocketWriteError?) -> ())? = nil) {
         guard isConnected else { return }
         dequeueWrite(pong, code: .pong, writeCompletion: completion)
     }
@@ -1213,12 +1222,14 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
     /**
      Used to write things to the stream
      */
-    private func dequeueWrite(_ data: Data, code: OpCode, writeCompletion: (() -> ())? = nil) {
+    private func dequeueWrite(_ data: Data, code: OpCode, writeCompletion: ((WebSocketWriteError?) -> ())? = nil) {
         let operation = BlockOperation()
         operation.addExecutionBlock { [weak self, weak operation] in
-            //stream isn't ready, let's wait
+            // stream isn't ready, let's wait (?)
+            // self is nil so we do NOT have callbackQueue, so there is no way to call writeCompletion on correct queue
             guard let self = self else { return }
             guard let sOperation = operation else { return }
+
             var offset = 2
             var firstByte:UInt8 = self.FinMask | code.rawValue
             var data = data
@@ -1260,6 +1271,11 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
             var total = 0
             while !sOperation.isCancelled {
                 if !self.readyToWrite {
+                    if let callback = writeCompletion {
+                        self.callbackQueue.async {
+                            callback(.notReadyToWrite)
+                        }
+                    }
                     self.doDisconnect(WSError(type: .outputStreamWriteError, message: "output stream had an error during write", code: 0))
                     break
                 }
@@ -1267,7 +1283,13 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
                 let writeBuffer = UnsafeRawPointer(frame!.bytes+total).assumingMemoryBound(to: UInt8.self)
                 let len = stream.write(data: Data(bytes: writeBuffer, count: offset-total))
                 if len <= 0 {
-                    self.doDisconnect(WSError(type: .outputStreamWriteError, message: "output stream had an error during write", code: 0))
+                    let error = WSError(type: .outputStreamWriteError, message: "output stream had an error during write", code: 0)
+                    if let callback = writeCompletion {
+                        self.callbackQueue.async {
+                            callback(.error(error))
+                        }
+                    }
+                    self.doDisconnect(error)
                     break
                 } else {
                     total += len
@@ -1275,13 +1297,21 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
                 if total >= offset {
                     if let callback = writeCompletion {
                         self.callbackQueue.async {
-                            callback()
+                            callback(nil)
                         }
                     }
-
                     break
                 }
             }
+
+            if sOperation.isCancelled {
+                if let callback = writeCompletion {
+                    self.callbackQueue.async {
+                        callback(.cancelled)
+                    }
+                }
+            }
+
         }
         writeQueue.addOperation(operation)
     }
