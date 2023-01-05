@@ -48,7 +48,7 @@ public enum WebSocketWriteError: Error {
     case error(Error)
 }
 
-public protocol WebSocketClient: class {
+public protocol WebSocketClient: AnyObject {
     func connect()
     func disconnect(closeCode: UInt16)
     func write(string: String, completion: ((WebSocketWriteError?) -> ())?)
@@ -94,8 +94,8 @@ public enum WebSocketEvent {
     case cancelled
 }
 
-public protocol WebSocketDelegate: class {
-    func didReceive(event: WebSocketEvent, client: WebSocket)
+public protocol WebSocketDelegate: AnyObject {
+    func didReceive(event: WebSocketEvent, client: WebSocketClient)
 }
 
 open class WebSocket: WebSocketClient, EngineDelegate {
