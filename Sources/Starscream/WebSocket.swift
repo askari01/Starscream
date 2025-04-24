@@ -93,6 +93,7 @@ public enum WebSocketEvent {
     case reconnectSuggested(Bool)
     case cancelled
     case peerClosed
+    case waiting(Error?)
 }
 
 public protocol WebSocketDelegate: AnyObject {
